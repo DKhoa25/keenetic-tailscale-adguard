@@ -393,7 +393,7 @@ error_handler() {
     echo "Arch: $(uname -m)"
     echo "Memory: $(free -m | grep Mem | awk '{print $2}') MB"
     
-    if [ -f "$LOG_FILE" ]; thì
+    if [ -f "$LOG_FILE" ]; then
         echo "Log: $LOG_FILE"
         echo "10 dòng cuối log:"
         tail -n 10 "$LOG_FILE"
