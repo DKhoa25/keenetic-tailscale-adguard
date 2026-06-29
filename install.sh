@@ -15,6 +15,8 @@ LOG_DIR="/var/log/keenetic-install"
 LOG_FILE="$LOG_DIR/install_$(date +%Y%m%d_%H%M%S).log"
 MIN_REQUIRED_SPACE=51200  # 50MB tính bằng KB
 TIMEOUT=60  # Timeout cho các thao tác mạng
+MAX_RETRIES=3  # Số lần thử lại tối đa
+RETRY_DELAY=5  # Giây chờ giữa các lần thử
 
 # ============================================
 # MÀU SẮC CHO OUTPUT
@@ -241,8 +243,50 @@ install_dependencies() {
 }
 
 # ============================================
-# TẢI TRỰC TIẾP (Không dùng Git)
+# TẢI TRỰC TIẾP (Không dùng Git) - CÓ RETRY
 # ============================================
+download_file_with_retry() {
+    local file="$1"
+    local retry_count=0
+    local success=false
+    
+    while [ $retry_count -lt $MAX_RETRIES ] && [ "$success" = false ]; do
+        log_info "Đang tải: $file (lần thử $((retry_count + 1))/$MAX_RETRIES)..."
+        
+        # Thử wget trước
+        if command -v wget >/dev/null 2>&1; then
+            if wget -q --timeout=$TIMEOUT --show-progress "$RAW_URL/$file" 2>&1 | tee -a "$LOG_FILE"; then
+                chmod +x "$file" 2>/dev/null || true
+                log_success "Đã tải: $file"
+                success=true
+                break
+            fi
+        fi
+        
+        # Thử curl nếu wget thất bại
+        if command -v curl >/dev/null 2>&1; then
+            if curl -L --connect-timeout $TIMEOUT -s -o "$file" "$RAW_URL/$file" 2>&1 | tee -a "$LOG_FILE"; then
+                chmod +x "$file" 2>/dev/null || true
+                log_success "Đã tải: $file"
+                success=true
+                break
+            fi
+        fi
+        
+        retry_count=$((retry_count + 1))
+        if [ $retry_count -lt $MAX_RETRIES ]; then
+            log_warning "Không thể tải $file, thử lại sau ${RETRY_DELAY}s..."
+            sleep $RETRY_DELAY
+        fi
+    done
+    
+    if [ "$success" = false ]; then
+        log_error "Không thể tải: $file sau $MAX_RETRIES lần thử"
+        return 1
+    fi
+    return 0
+}
+
 download_files() {
     log_step "TẢI MÃ NGUỒN"
     
@@ -257,28 +301,10 @@ download_files() {
     local success=true
     
     for file in $FILES; do
-        log_info "Đang tải: $file..."
-        
-        # Thử wget trước
-        if command -v wget >/dev/null 2>&1; then
-            if wget -q --timeout=$TIMEOUT --show-progress "$RAW_URL/$file" 2>&1 | tee -a "$LOG_FILE"; then
-                chmod +x "$file" 2>/dev/null || true
-                log_success "Đã tải: $file"
-                continue
-            fi
+        if ! download_file_with_retry "$file"; then
+            success=false
+            break  # Thoát nếu một file không tải được
         fi
-        
-        # Thử curl nếu wget thất bại
-        if command -v curl >/dev/null 2>&1; then
-            if curl -L --connect-timeout $TIMEOUT -s -o "$file" "$RAW_URL/$file" 2>&1 | tee -a "$LOG_FILE"; then
-                chmod +x "$file" 2>/dev/null || true
-                log_success "Đã tải: $file"
-                continue
-            fi
-        fi
-        
-        log_error "Không thể tải: $file"
-        success=false
     done
     
     if [ "$success" = true ]; then
@@ -291,7 +317,7 @@ download_files() {
 }
 
 # ============================================
-# CÀI ĐẶT CHÍNH
+# CÀI ĐẶT CHÍNH - CÓ KIỂM TRA VÒNG LẶP
 # ============================================
 run_installer() {
     log_step "BẮT ĐẦU CÀI ĐẶT CHÍNH"
@@ -322,14 +348,34 @@ run_installer() {
     log_info "Bắt đầu cài đặt..."
     echo ""
     
-    # Chạy script với xử lý lỗi
-    if ./install.sh 2>&1 | tee -a "$LOG_FILE"; then
-        return 0
-    else
-        local exit_code=$?
-        log_error "Script cài đặt chính thất bại với mã lỗi: $exit_code"
-        return $exit_code
-    fi
+    # Chạy script với xử lý lỗi và kiểm tra vòng lặp
+    local attempt=0
+    local max_attempts=2
+    local install_success=false
+    
+    while [ $attempt -lt $max_attempts ] && [ "$install_success" = false ]; do
+        attempt=$((attempt + 1))
+        log_info "Lần chạy cài đặt thứ $attempt/$max_attempts"
+        
+        if ./install.sh 2>&1 | tee -a "$LOG_FILE"; then
+            install_success=true
+            log_success "Script install.sh chạy thành công!"
+            break
+        else
+            local exit_code=$?
+            log_error "Script cài đặt chính thất bại với mã lỗi: $exit_code"
+            
+            if [ $attempt -lt $max_attempts ]; then
+                log_warning "Sẽ thử lại sau 5 giây..."
+                sleep 5
+            else
+                log_error "Đã thử $max_attempts lần nhưng thất bại!"
+                return $exit_code
+            fi
+        fi
+    done
+    
+    return 0
 }
 
 # ============================================
@@ -448,14 +494,12 @@ fi
 if ! download_files; then
     log_error "Không thể tải mã nguồn!"
     log_error "Vui lòng kiểm tra kết nối và thử lại."
-    restore_from_backup $?
     exit 1
 fi
 
 # Chạy cài đặt
 if ! run_installer; then
     log_error "Cài đặt thất bại!"
-    restore_from_backup $?
     exit 1
 fi
 
