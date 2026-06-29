@@ -87,6 +87,20 @@ free -m
 opkg --version
 
 🚀 Cài đặt nhanh
+
+## 1. Clone Repository
+cd opt
+git clone  https://github.com/DKhoa25/keenetic-tailscale-adguard.git
+cd arch-setup-script
+
+## 2. Chạy Script
+bash
+
+chmod +x arch-setup.sh
+sudo ./arch-setup.sh
+
+
+
 1️⃣ Tải script
 bash
 
