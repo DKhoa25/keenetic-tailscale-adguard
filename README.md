@@ -77,9 +77,15 @@ opkg update
 opkg install wget-ssl ca-certificates
 
 # 3. Clone
-/opt/keenetic-tailscale-adguard
+
+# Xóa thư mục cũ
+rm -rf /opt/keenetic-tailscale-adguard
+
+# Clone lại từ GitHub
+cd /opt
 git clone https://github.com/DKhoa25/keenetic-tailscale-adguard.git
 
+# Di chuyển vào thư mục
 cd /opt/keenetic-tailscale-adguard
 # Cấp quyền và chạy
 chmod +x install.sh
