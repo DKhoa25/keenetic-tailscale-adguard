@@ -70,30 +70,21 @@ markdown
 ---
 
 ## 📦 Cài Đặt Nhanh
+# 1. Cập nhật Entware
+opkg update
 
-### Cách 1: Clone Trực Tiếp (Khuyến nghị)
-```bash
-# Chạy với quyền root
-curl -sSL https://raw.githubusercontent.com/DKhoa25/keenetic-tailscale-adguard/main/install.sh | sh
+# 2. Cài các gói hỗ trợ SSL
+opkg install wget-ssl ca-certificates
 
-Cách 2: Tải và Chạy
-bash
+# 3. Kiểm tra wget-ssl
+wget-ssl --version
 
-# Tải script
-wget https://raw.githubusercontent.com/DKhoa25/keenetic-tailscale-adguard/main/installer.sh
-
-# Cấp quyền và chạy
-chmod +x installer.sh
-./installer.sh
-
-Cách 3: Manual Install
-bash
-
-# Clone repository
-git clone https://github.com/DKhoa25/keenetic-tailscale-adguard.git /opt/keenetic-tailscale-adguard
-
-# Vào thư mục và chạy
+# 4. Tạo folder và tải
+mkdir -p /opt/keenetic-tailscale-adguard
 cd /opt/keenetic-tailscale-adguard
+git clone https://github.com/DKhoa25/keenetic-tailscale-adguard.git /opt/keenetic-tailscale-adguard
+# Cấp quyền và chạy
+chmod +x install.sh
 ./install.sh
 
 📖 Hướng Dẫn Chi Tiết
