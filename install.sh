@@ -1,10 +1,10 @@
 #!/bin/sh
 # ============================================
-# Cài đặt Tailscale + AdGuard Home trên Keenetic
-# Version: 2.0 - Fixed
+# Cài đặt Tailscale + AdGuard Home + NTP trên Keenetic
+# Version: 1.0
 # ============================================
 
-echo "=== BAT DAU CAI DAT TAILSCALE & ADGUARD HOME ==="
+echo "=== BAT DAU CAI DAT TAILSCALE & ADGUARD HOME & NTP ==="
 
 # Kiểm tra quyền root
 if [ "$(id -u)" != "0" ]; then
@@ -22,11 +22,60 @@ check_success() {
     fi
 }
 
+# Hàm tự động phát hiện subnet
+detect_subnet() {
+    # Lấy IP của interface br0 (hoặc eth0, wlan0)
+    local router_ip=$(ip addr show br0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)
+    
+    # Nếu không có br0, thử các interface khác
+    if [ -z "$router_ip" ]; then
+        router_ip=$(ip addr show eth0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)
+    fi
+    if [ -z "$router_ip" ]; then
+        router_ip=$(ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)
+    fi
+    if [ -z "$router_ip" ]; then
+        router_ip=$(ip route | grep default | awk '{print $9}' | head -1)
+    fi
+    
+    # Nếu vẫn không có, thử lấy từ default gateway
+    if [ -z "$router_ip" ]; then
+        router_ip=$(ip route | grep default | awk '{print $3}' | head -1)
+    fi
+    
+    # Lấy subnet mask
+    local subnet_mask=$(ip addr show br0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f2)
+    if [ -z "$subnet_mask" ]; then
+        subnet_mask="24" # Mặc định /24
+    fi
+    
+    # Chuyển đổi IP thành subnet
+    if [ -n "$router_ip" ]; then
+        # Lấy 3 octet đầu của IP
+        local subnet_base=$(echo "$router_ip" | cut -d. -f1-3)
+        DETECTED_SUBNET="${subnet_base}.0/${subnet_mask}"
+        DETECTED_IP="$router_ip"
+        echo "   📍 Phát hiện IP router: $DETECTED_IP"
+        echo "   📍 Phát hiện subnet: $DETECTED_SUBNET"
+        return 0
+    else
+        echo "   ⚠️ Không thể phát hiện subnet, sử dụng mặc định: 192.168.1.0/24"
+        DETECTED_SUBNET="192.168.1.0/24"
+        DETECTED_IP="192.168.1.1"
+        return 1
+    fi
+}
+
+# Phát hiện subnet trước khi cài đặt
+echo ""
+echo "🔍 Đang phát hiện cấu hình mạng..."
+detect_subnet
+
 # 1. Cài đặt packages
 echo ""
 echo "📦 1. Cài đặt packages..."
 opkg update
-opkg install iptables tailscale ca-certificates adguardhome-go
+opkg install iptables tailscale ca-certificates adguardhome-go ntpclient
 check_success
 
 # 2. Tạo thư mục
@@ -41,9 +90,11 @@ mkdir -p /opt/etc/AdGuardHome
 mkdir -p /opt/etc/init.d/rc.d
 mkdir -p /opt/var/log
 mkdir -p /opt/etc/crontabs
+mkdir -p /opt/var/lib/ntp
+mkdir -p /opt/share/zoneinfo
 check_success
 
-# 3. Tạo netfilter script (SỬA LỖI)
+# 3. Tạo netfilter script với subnet tự động
 echo ""
 echo "🔧 3. Tạo netfilter script..."
 cat > /opt/etc/ndm/netfilter.d/100-tailscale.sh << 'EOF'
@@ -163,7 +214,7 @@ EOF
 chmod +x /opt/etc/ndm/netfilter.d/100-tailscale.sh
 check_success
 
-# 4. Tạo init script cho AdGuard Home (SỬA LỖI)
+# 4. Tạo init script cho AdGuard Home
 echo ""
 echo "🚀 4. Tạo init script cho AdGuard Home..."
 cat > /opt/etc/init.d/S97adguardhome << 'EOF'
@@ -332,7 +383,7 @@ EOF
 chmod +x /opt/etc/init.d/S97adguardhome
 check_success
 
-# 5. Tạo init script cho tailscaled (SỬA LỖI)
+# 5. Tạo init script cho tailscaled
 echo ""
 echo "🚀 5. Tạo init script cho tailscaled..."
 cat > /opt/etc/init.d/S98tailscaled << 'EOF'
@@ -425,10 +476,16 @@ EOF
 chmod +x /opt/etc/init.d/S98tailscaled
 check_success
 
-# 6. Tạo init script cho tailscale (SỬA LỖI)
+# 6. Tạo init script cho tailscale (có tương tác auth key và subnet tự động)
 echo ""
 echo "🚀 6. Tạo init script cho tailscale..."
-cat > /opt/etc/init.d/S99tailscale << 'EOF'
+
+# Lấy subnet đã phát hiện
+if [ -z "$DETECTED_SUBNET" ]; then
+    detect_subnet
+fi
+
+cat > /opt/etc/init.d/S99tailscale << EOF
 #!/bin/sh
 
 START=99
@@ -440,22 +497,50 @@ if [ -f /opt/etc/tailscale.conf ]; then
 fi
 
 # Default values
-TS_AUTHKEY="${TS_AUTHKEY:-}"
+TS_AUTHKEY="\${TS_AUTHKEY:-}"
 TS_OPTS="--accept-dns=false --netfilter-mode=off"
-TS_ROUTES="${TS_ROUTES:-192.168.16.0/24}"
-TS_EXIT_NODE="${TS_EXIT_NODE:-true}"
-TS_SSH="${TS_SSH:-true}"
+TS_ROUTES="\${TS_ROUTES:-$DETECTED_SUBNET}"
+TS_EXIT_NODE="\${TS_EXIT_NODE:-true}"
+TS_SSH="\${TS_SSH:-true}"
 
 # Build options
-if [ -n "$TS_ROUTES" ]; then
-    TS_OPTS="$TS_OPTS --advertise-routes=$TS_ROUTES"
+if [ -n "\$TS_ROUTES" ]; then
+    TS_OPTS="\$TS_OPTS --advertise-routes=\$TS_ROUTES"
 fi
-if [ "$TS_EXIT_NODE" = "true" ]; then
-    TS_OPTS="$TS_OPTS --advertise-exit-node"
+if [ "\$TS_EXIT_NODE" = "true" ]; then
+    TS_OPTS="\$TS_OPTS --advertise-exit-node"
 fi
-if [ "$TS_SSH" = "true" ]; then
-    TS_OPTS="$TS_OPTS --ssh"
+if [ "\$TS_SSH" = "true" ]; then
+    TS_OPTS="\$TS_OPTS --ssh"
 fi
+
+# Hàm nhập auth key tương tác
+get_auth_key() {
+    echo ""
+    echo "=========================================="
+    echo "🔑 TAILSCALE AUTHENTICATION REQUIRED"
+    echo "=========================================="
+    echo "Vui lòng nhập Tailscale Auth Key"
+    echo "Lấy tại: https://login.tailscale.com/admin/settings/keys"
+    echo ""
+    echo "Nhập auth key (hoặc nhấn Enter để bỏ qua):"
+    read -r AUTHKEY_INPUT
+    
+    if [ -n "\$AUTHKEY_INPUT" ]; then
+        # Lưu vào config file
+        if [ -f /opt/etc/tailscale.conf ]; then
+            sed -i "s/export TS_AUTHKEY=.*/export TS_AUTHKEY=\"\$AUTHKEY_INPUT\"/" /opt/etc/tailscale.conf
+        else
+            echo "export TS_AUTHKEY=\"\$AUTHKEY_INPUT\"" > /opt/etc/tailscale.conf
+        fi
+        export TS_AUTHKEY="\$AUTHKEY_INPUT"
+        echo "   ✅ Đã lưu auth key"
+        return 0
+    else
+        echo "   ⚠️ Bỏ qua, không có auth key"
+        return 1
+    fi
+}
 
 start() {
     echo "Dang khoi dong Tailscale..."
@@ -487,25 +572,48 @@ start() {
     # Wait for tailscaled socket
     local max_attempts=10
     local attempt=0
-    while [ ! -S /opt/var/run/tailscaled.sock ] && [ $attempt -lt $max_attempts ]; do
+    while [ ! -S /opt/var/run/tailscaled.sock ] && [ \$attempt -lt \$max_attempts ]; do
         sleep 1
-        attempt=$((attempt + 1))
+        attempt=\$((attempt + 1))
     done
     
     # Check if already logged in
-    local status_output=$(tailscale status 2>/dev/null)
-    if echo "$status_output" | grep -q "Logged out"; then
+    local status_output=\$(tailscale status 2>/dev/null)
+    if echo "\$status_output" | grep -q "Logged out"; then
         echo "   🔑 Dang login Tailscale..."
-        if [ -n "$TS_AUTHKEY" ]; then
-            tailscale up --authkey="$TS_AUTHKEY" $TS_OPTS
-        else
-            echo "   ❌ Khong tim thay TS_AUTHKEY trong /opt/etc/tailscale.conf"
-            echo "   Vui long chay: tailscale up --authkey=YOUR_KEY $TS_OPTS"
-            return 1
+        
+        # Nếu chưa có auth key, yêu cầu nhập
+        if [ -z "\$TS_AUTHKEY" ]; then
+            echo "   ⚠️ Chưa có Auth Key!"
+            if get_auth_key; then
+                # Reload auth key
+                if [ -f /opt/etc/tailscale.conf ]; then
+                    . /opt/etc/tailscale.conf
+                fi
+            else
+                echo "   ❌ Không có auth key, không thể login"
+                echo "   Vui lòng chạy lệnh sau để login:"
+                echo "   tailscale up --authkey=YOUR_AUTH_KEY \$TS_OPTS"
+                return 1
+            fi
+        fi
+        
+        # Thử login với auth key
+        if [ -n "\$TS_AUTHKEY" ]; then
+            echo "   Đang login với auth key..."
+            tailscale up --authkey="\$TS_AUTHKEY" \$TS_OPTS
+            if [ \$? -ne 0 ]; then
+                echo "   ❌ Login thất bại! Auth key không hợp lệ hoặc hết hạn"
+                echo "   Vui lòng nhập auth key mới:"
+                if get_auth_key; then
+                    . /opt/etc/tailscale.conf
+                    tailscale up --authkey="\$TS_AUTHKEY" \$TS_OPTS
+                fi
+            fi
         fi
     else
         echo "   🔄 Tailscale da login, cap nhat cau hinh..."
-        tailscale up $TS_OPTS
+        tailscale up \$TS_OPTS
     fi
     
     sleep 3
@@ -519,10 +627,10 @@ start() {
     fi
     
     # Hiển thị thông tin
-    local ip=$(ip addr show tailscale0 2>/dev/null | grep -oP 'inet \K[\d.]+' | head -1)
-    if [ -n "$ip" ]; then
-        echo "   ✅ Tailscale da khoi dong voi IP: $ip"
-        if [ "$TS_EXIT_NODE" = "true" ]; then
+    local ip=\$(ip addr show tailscale0 2>/dev/null | grep -oP 'inet \K[\d.]+' | head -1)
+    if [ -n "\$ip" ]; then
+        echo "   ✅ Tailscale da khoi dong voi IP: \$ip"
+        if [ "\$TS_EXIT_NODE" = "true" ]; then
             echo "   ✅ Exit Node da duoc BAT"
         fi
         echo ""
@@ -555,7 +663,7 @@ status() {
     fi
 }
 
-case "$1" in
+case "\$1" in
     start)
         start
         ;;
@@ -571,7 +679,7 @@ case "$1" in
         status
         ;;
     *)
-        echo "Cach dung: $0 {start|stop|restart|status}"
+        echo "Cach dung: \$0 {start|stop|restart|status}"
         exit 1
         ;;
 esac
@@ -582,30 +690,31 @@ EOF
 chmod +x /opt/etc/init.d/S99tailscale
 check_success
 
-# 7. Tạo sysctl.conf
+# 7. Tạo file cấu hình authkey với subnet tự động
 echo ""
-echo "⚙️ 7. Tạo sysctl.conf..."
-cat > /opt/etc/sysctl.conf << 'EOF'
-net.ipv4.ip_forward=1
-net.ipv6.conf.all.forwarding=1
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control=bbr
-EOF
-check_success
+echo "🔑 7. Cấu hình Tailscale với subnet: $DETECTED_SUBNET"
 
-# 8. Tạo file cấu hình authkey (SỬA LỖI)
+# Hỏi người dùng nhập auth key
 echo ""
-echo "🔑 8. Tạo file cấu hình tailscale..."
-cat > /opt/etc/tailscale.conf << 'EOF'
+echo "=========================================="
+echo "VUI LÒNG NHẬP TAILSCALE AUTH KEY"
+echo "=========================================="
+echo "Lấy auth key tại: https://login.tailscale.com/admin/settings/keys"
+echo ""
+echo "Nhập auth key (hoặc để trống để nhập sau):"
+read -r TS_AUTHKEY_INPUT
+
+# Tạo file cấu hình với subnet đã phát hiện
+cat > /opt/etc/tailscale.conf << EOF
 # Tailscale Configuration
 # ========================
 
 # Auth key từ Tailscale Admin Console
 # Tạo tại: https://login.tailscale.com/admin/settings/keys
-export TS_AUTHKEY="tskey-auth-k2eCosuPTC21CNTRL-76539zJciu3ZPiYBWzbiu3zJr6B9dBhR3"
+export TS_AUTHKEY="${TS_AUTHKEY_INPUT}"
 
-# Cấu hình mạng
-export TS_ROUTES="192.168.16.0/24"        # Subnet muốn advertise
+# Cấu hình mạng (Tự động phát hiện)
+export TS_ROUTES="${DETECTED_SUBNET}"        # Subnet muốn advertise
 export TS_EXIT_NODE="true"                # Bật Exit Node
 export TS_SSH="true"                       # Bật SSH qua Tailscale
 
@@ -615,11 +724,289 @@ export TS_NETFILTER_MODE="off"
 EOF
 
 chmod 600 /opt/etc/tailscale.conf
+
+if [ -n "$TS_AUTHKEY_INPUT" ]; then
+    echo "   ✅ Đã lưu auth key"
+else
+    echo "   ⚠️ Bạn để trống auth key, sẽ nhập sau khi chạy Tailscale"
+fi
 check_success
 
-# 9. Tạo script fix DNS conflict (SỬA LỖI)
+# 8. Cấu hình NTP và múi giờ Việt Nam
 echo ""
-echo "🔧 9. Tạo script fix DNS conflict..."
+echo "🕐 8. Cấu hình NTP và múi giờ Việt Nam..."
+
+# Tạo script cấu hình múi giờ
+cat > /opt/bin/setup-timezone.sh << 'EOF'
+#!/bin/sh
+# ============================================
+# Cấu hình múi giờ Việt Nam và NTP
+# ============================================
+
+LOG_FILE="/opt/var/log/timezone-setup.log"
+DATE=$(date '+%Y-%m-%d %H:%M:%S')
+
+log() {
+    echo "[$DATE] $1" >> $LOG_FILE
+}
+
+echo "=== CẤU HÌNH MÚI GIỜ VIỆT NAM ==="
+
+# 1. Cấu hình múi giờ
+echo "1. Cấu hình múi giờ Asia/Ho_Chi_Minh..."
+
+# Tạo file cấu hình múi giờ
+cat > /opt/etc/timezone << 'TZ_CONFIG'
+Asia/Ho_Chi_Minh
+TZ_CONFIG
+
+# Tạo symlink cho localtime
+ln -sf /opt/share/zoneinfo/Asia/Ho_Chi_Minh /opt/etc/localtime 2>/dev/null || \
+ln -sf /usr/share/zoneinfo/Asia/Ho_Chi_Minh /etc/localtime 2>/dev/null
+
+# Export biến môi trường
+export TZ='Asia/Ho_Chi_Minh'
+
+# Thêm vào profile
+if ! grep -q "TZ=Asia/Ho_Chi_Minh" /opt/etc/profile 2>/dev/null; then
+    echo "export TZ='Asia/Ho_Chi_Minh'" >> /opt/etc/profile
+fi
+
+# Kiểm tra múi giờ
+CURRENT_TZ=$(date +%Z)
+echo "   ✅ Múi giờ hiện tại: $CURRENT_TZ"
+echo "   ✅ Thời gian hiện tại: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+
+# 2. Cấu hình NTP
+echo ""
+echo "2. Cấu hình NTP..."
+
+# Tạo file cấu hình NTP cho Việt Nam
+cat > /opt/etc/ntp.conf << 'NTP_CONFIG'
+# NTP Servers cho Việt Nam và Đông Nam Á
+server 0.vn.pool.ntp.org iburst
+server 1.vn.pool.ntp.org iburst
+server 2.vn.pool.ntp.org iburst
+server 3.vn.pool.ntp.org iburst
+
+# Dự phòng các server gần nhất
+server 0.asia.pool.ntp.org iburst
+server 1.asia.pool.ntp.org iburst
+server 2.asia.pool.ntp.org iburst
+
+# Cấu hình chung
+driftfile /opt/var/lib/ntp/ntp.drift
+logfile /opt/var/log/ntp.log
+
+# Giới hạn truy cập
+restrict default kod nomodify notrap nopeer noquery
+restrict -6 default kod nomodify notrap nopeer noquery
+restrict 127.0.0.1
+restrict -6 ::1
+NTP_CONFIG
+
+# Tạo thư mục cho NTP
+mkdir -p /opt/var/lib/ntp
+mkdir -p /opt/var/log
+
+# 3. Tạo script đồng bộ thời gian
+cat > /opt/bin/sync-time.sh << 'SYNC_SCRIPT'
+#!/bin/sh
+# ============================================
+# Đồng bộ thời gian với NTP Server
+# ============================================
+
+LOG_FILE="/opt/var/log/time-sync.log"
+DATE=$(date '+%Y-%m-%d %H:%M:%S')
+
+log() {
+    echo "[$DATE] $1" >> $LOG_FILE
+}
+
+echo "=== ĐỒNG BỘ THỜI GIAN ==="
+
+# Kiểm tra kết nối internet
+if ! ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
+    echo "   ⚠️ Không có kết nối internet, bỏ qua đồng bộ"
+    log "WARN: No internet connection"
+    exit 1
+fi
+
+# Đồng bộ thời gian
+if command -v ntpdate >/dev/null 2>&1; then
+    echo "   Đồng bộ qua ntpdate..."
+    ntpdate -u 0.vn.pool.ntp.org 2>&1 | tee -a $LOG_FILE
+elif command -v ntpd >/dev/null 2>&1; then
+    echo "   Đồng bộ qua ntpd..."
+    ntpd -q -g -c /opt/etc/ntp.conf 2>&1 | tee -a $LOG_FILE
+elif command -v chronyc >/dev/null 2>&1; then
+    echo "   Đồng bộ qua chrony..."
+    chronyc -a makestep 2>&1 | tee -a $LOG_FILE
+else
+    echo "   ⚠️ Không tìm thấy NTP client"
+    # Thử đồng bộ qua busybox
+    if command -v busybox >/dev/null 2>&1; then
+        busybox ntpdate -u 0.vn.pool.ntp.org 2>&1 | tee -a $LOG_FILE
+    fi
+fi
+
+# Cập nhật thời gian hardware clock nếu có
+if command -v hwclock >/dev/null 2>&1; then
+    hwclock --systohc 2>/dev/null && echo "   ✅ Đã cập nhật hardware clock"
+fi
+
+# Kiểm tra kết quả
+NEW_TIME=$(date '+%Y-%m-%d %H:%M:%S %Z')
+echo "   ✅ Thời gian sau đồng bộ: $NEW_TIME"
+log "Sync completed: $NEW_TIME"
+
+# Hiển thị chênh lệch thời gian
+if [ -f /opt/var/lib/ntp/ntp.drift ]; then
+    DRIFT=$(cat /opt/var/lib/ntp/ntp.drift 2>/dev/null)
+    echo "   📊 Drift: $DRIFT ppm"
+fi
+
+echo ""
+echo "✅ Đồng bộ thời gian hoàn tất"
+SYNC_SCRIPT
+
+chmod +x /opt/bin/sync-time.sh
+
+# 4. Tạo init script cho NTP
+cat > /opt/etc/init.d/S95ntp << 'NTP_INIT'
+#!/bin/sh
+
+START=95
+STOP=10
+PIDFILE=/opt/var/run/ntpd.pid
+
+start() {
+    echo "Đang khởi động NTP..."
+    
+    # Kiểm tra và tạo thư mục
+    mkdir -p /opt/var/lib/ntp
+    mkdir -p /opt/var/log
+    
+    # Đồng bộ thời gian lần đầu
+    echo "   Đồng bộ thời gian lần đầu..."
+    /opt/bin/sync-time.sh
+    
+    # Khởi động NTP daemon nếu có
+    if command -v ntpd >/dev/null 2>&1; then
+        echo "   Khởi động ntpd daemon..."
+        ntpd -g -c /opt/etc/ntp.conf -p /opt/var/run/ntpd.pid
+        sleep 2
+        if pgrep ntpd >/dev/null; then
+            echo "   ✅ NTP daemon đã khởi động (PID: $(pgrep ntpd))"
+        else
+            echo "   ⚠️ Không thể khởi động ntpd daemon"
+        fi
+    elif command -v chronyd >/dev/null 2>&1; then
+        echo "   Khởi động chronyd daemon..."
+        chronyd -f /opt/etc/ntp.conf
+        sleep 2
+        if pgrep chronyd >/dev/null; then
+            echo "   ✅ Chrony daemon đã khởi động (PID: $(pgrep chronyd))"
+        else
+            echo "   ⚠️ Không thể khởi động chronyd daemon"
+        fi
+    else
+        echo "   ⚠️ Không có NTP daemon, chỉ đồng bộ định kỳ qua cron"
+    fi
+}
+
+stop() {
+    echo "Đang dừng NTP..."
+    pkill ntpd 2>/dev/null
+    pkill chronyd 2>/dev/null
+    rm -f $PIDFILE
+    echo "   ✅ NTP đã dừng"
+}
+
+status() {
+    if pgrep ntpd >/dev/null || pgrep chronyd >/dev/null; then
+        echo "   ✅ NTP đang chạy"
+        echo "   Thời gian hiện tại: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+    else
+        echo "   ❌ NTP không chạy"
+    fi
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        stop
+        sleep 2
+        start
+        ;;
+    status)
+        status
+        ;;
+    *)
+        echo "Cách dùng: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac
+
+exit 0
+NTP_INIT
+
+chmod +x /opt/etc/init.d/S95ntp
+
+# 5. Cập nhật CRON với sync time
+echo ""
+echo "5. Cập nhật CRON với đồng bộ thời gian..."
+
+# Backup và cập nhật crontab
+if [ -f /opt/etc/crontab ]; then
+    cp /opt/etc/crontab /opt/etc/crontab.bak
+fi
+
+# Thêm các job đồng bộ thời gian
+cat >> /opt/etc/crontab << 'CRON_NTP'
+# Đồng bộ thời gian mỗi 6 tiếng
+0 */6 * * * /opt/bin/sync-time.sh
+
+# Đồng bộ thời gian sau reboot
+@reboot /opt/bin/sync-time.sh
+
+# Cập nhật hardware clock mỗi ngày
+0 3 * * * /opt/bin/sync-time.sh && hwclock --systohc 2>/dev/null
+CRON_NTP
+
+echo ""
+echo "✅ Cấu hình NTP và múi giờ Việt Nam hoàn tất!"
+echo "   📍 Múi giờ: $(date '+%Z')"
+echo "   🕐 Thời gian: $(date '+%Y-%m-%d %H:%M:%S')"
+
+log "Timezone and NTP setup completed"
+EOF
+
+chmod +x /opt/bin/setup-timezone.sh
+
+# Chạy script cấu hình múi giờ
+/opt/bin/setup-timezone.sh
+check_success
+
+# 9. Tạo sysctl.conf
+echo ""
+echo "⚙️ 9. Tạo sysctl.conf..."
+cat > /opt/etc/sysctl.conf << 'EOF'
+net.ipv4.ip_forward=1
+net.ipv6.conf.all.forwarding=1
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+EOF
+check_success
+
+# 10. Tạo script fix DNS conflict
+echo ""
+echo "🔧 10. Tạo script fix DNS conflict..."
 cat > /opt/bin/fix-dns-conflict.sh << 'EOF'
 #!/bin/sh
 # ============================================
@@ -693,9 +1080,9 @@ EOF
 chmod +x /opt/bin/fix-dns-conflict.sh
 check_success
 
-# 10. Tạo script setup DNS (SỬA LỖI)
+# 11. Tạo script setup DNS
 echo ""
-echo "🔧 10. Tạo script setup DNS..."
+echo "🔧 11. Tạo script setup DNS..."
 cat > /opt/bin/setup-dns.sh << 'EOF'
 #!/bin/sh
 # ============================================
@@ -746,9 +1133,76 @@ EOF
 chmod +x /opt/bin/setup-dns.sh
 check_success
 
-# 11. Tạo script kiểm tra tổng hợp (SỬA LỖI)
+# 12. Tạo script start-all
 echo ""
-echo "🔍 11. Tạo script kiểm tra tổng hợp..."
+echo "🚀 12. Tạo script start-all..."
+cat > /opt/bin/start-all.sh << 'EOF'
+#!/bin/sh
+echo "=== KHOI DONG TOAN BO DICH VU ==="
+echo ""
+
+# Kiểm tra auth key
+if [ -f /opt/etc/tailscale.conf ]; then
+    . /opt/etc/tailscale.conf
+    if [ -z "$TS_AUTHKEY" ]; then
+        echo "⚠️ Chưa có Tailscale Auth Key!"
+        echo ""
+        echo "Vui lòng nhập Auth Key (hoặc để trống để bỏ qua):"
+        read -r AUTHKEY
+        if [ -n "$AUTHKEY" ]; then
+            sed -i "s/export TS_AUTHKEY=.*/export TS_AUTHKEY=\"$AUTHKEY\"/" /opt/etc/tailscale.conf
+            echo "   ✅ Đã lưu auth key"
+        else
+            echo "   ⚠️ Bỏ qua, Tailscale sẽ không tự động login"
+        fi
+    fi
+fi
+
+# Fix DNS trước
+echo "📌 Cau hinh DNS truoc khi khoi dong..."
+/opt/bin/setup-dns.sh
+sleep 2
+
+echo ""
+echo "📌 Khoi dong NTP..."
+/opt/etc/init.d/S95ntp start
+sleep 2
+
+echo ""
+echo "📌 Khoi dong AdGuard Home..."
+/opt/etc/init.d/S97adguardhome start
+sleep 3
+
+echo ""
+echo "📌 Khoi dong tailscaled..."
+/opt/etc/init.d/S98tailscaled start
+sleep 3
+
+echo ""
+echo "📌 Khoi dong Tailscale..."
+/opt/etc/init.d/S99tailscale start
+sleep 3
+
+# Khởi động CRON
+echo ""
+echo "📌 Khoi dong CRON..."
+if ! pgrep crond >/dev/null; then
+    crond -c /opt/etc/crontabs -L /opt/var/log/cron.log
+    echo "   ✅ CRON da khoi dong"
+else
+    echo "   ✅ CRON da chay"
+fi
+
+echo ""
+/opt/bin/check-all.sh
+EOF
+
+chmod +x /opt/bin/start-all.sh
+check_success
+
+# 13. Tạo script check-all
+echo ""
+echo "🔍 13. Tạo script kiểm tra tổng hợp..."
 cat > /opt/bin/check-all.sh << 'EOF'
 #!/bin/sh
 echo "========================================"
@@ -829,9 +1283,19 @@ echo "------------------------"
 iptables -L FORWARD | grep -E "tailscale|ts-" | head -5 || echo "Khong co rule tailscale trong FORWARD"
 
 echo ""
-echo "6. PROCESSES:"
+echo "6. NTP STATUS:"
 echo "------------------------"
-ps | grep -E "tailscale|AdGuardHome|crond" | grep -v grep
+if pgrep ntpd >/dev/null || pgrep chronyd >/dev/null; then
+    check_ok "NTP dang chay"
+    echo "  Thoi gian: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+else
+    check_warn "NTP khong chay (sync qua cron)"
+fi
+
+echo ""
+echo "7. PROCESSES:"
+echo "------------------------"
+ps | grep -E "tailscale|AdGuardHome|crond|ntpd" | grep -v grep
 
 echo ""
 echo "========================================"
@@ -840,60 +1304,16 @@ echo "  /opt/var/log/restart-services.log  - Restart log"
 echo "  /opt/var/log/auto-restart.log      - Auto-restart log"
 echo "  /opt/var/log/cron.log              - Cron log"
 echo "  /opt/var/log/dns-setup.log         - DNS setup log"
+echo "  /opt/var/log/ntp.log               - NTP log"
 echo "========================================"
 EOF
 
 chmod +x /opt/bin/check-all.sh
 check_success
 
-# 12. Tạo script start-all (SỬA LỖI)
+# 14. Tạo script restart-services
 echo ""
-echo "🚀 12. Tạo script start-all..."
-cat > /opt/bin/start-all.sh << 'EOF'
-#!/bin/sh
-echo "=== KHOI DONG TOAN BO DICH VU ==="
-echo ""
-
-# Fix DNS trước
-echo "📌 Cau hinh DNS truoc khi khoi dong..."
-/opt/bin/setup-dns.sh
-sleep 2
-
-echo ""
-echo "📌 Khoi dong AdGuard Home..."
-/opt/etc/init.d/S97adguardhome start
-sleep 3
-
-echo ""
-echo "📌 Khoi dong tailscaled..."
-/opt/etc/init.d/S98tailscaled start
-sleep 3
-
-echo ""
-echo "📌 Khoi dong Tailscale..."
-/opt/etc/init.d/S99tailscale start
-sleep 3
-
-# Khởi động CRON
-echo ""
-echo "📌 Khoi dong CRON..."
-if ! pgrep crond >/dev/null; then
-    crond -c /opt/etc/crontabs -L /opt/var/log/cron.log
-    echo "   ✅ CRON da khoi dong"
-else
-    echo "   ✅ CRON da chay"
-fi
-
-echo ""
-/opt/bin/check-all.sh
-EOF
-
-chmod +x /opt/bin/start-all.sh
-check_success
-
-# 13. Tạo script restart-services (SỬA LỖI)
-echo ""
-echo "🔄 13. Tạo script restart-services..."
+echo "🔄 14. Tạo script restart-services..."
 cat > /opt/bin/restart-services.sh << 'EOF'
 #!/bin/sh
 # ============================================
@@ -945,9 +1365,9 @@ EOF
 chmod +x /opt/bin/restart-services.sh
 check_success
 
-# 14. Tạo script check-and-restart (SỬA LỖI)
+# 15. Tạo script check-and-restart
 echo ""
-echo "🔍 14. Tạo script check-and-restart..."
+echo "🔍 15. Tạo script check-and-restart..."
 cat > /opt/bin/check-and-restart.sh << 'EOF'
 #!/bin/sh
 # ============================================
@@ -998,67 +1418,58 @@ EOF
 chmod +x /opt/bin/check-and-restart.sh
 check_success
 
-# 15. Tạo script check-cron (SỬA LỖI)
+# 16. Tạo script nhập auth key
 echo ""
-echo "📋 15. Tạo script check-cron..."
-cat > /opt/bin/check-cron.sh << 'EOF'
+echo "🔑 16. Tạo script nhập auth key..."
+cat > /opt/bin/set-authkey.sh << 'EOF'
 #!/bin/sh
-echo "========================================"
-echo "   CRON STATUS CHECK"
-echo "========================================"
+# ============================================
+# Cập nhật Tailscale Auth Key
+# ============================================
 
+echo "=== CẬP NHẬT TAILSCALE AUTH KEY ==="
 echo ""
-echo "1. CRON PROCESS:"
-echo "------------------------"
-if pgrep crond >/dev/null; then
-    echo "   ✅ CRON dang chay (PID: $(pgrep crond))"
-else
-    echo "   ❌ CRON khong chay"
+echo "Lấy auth key tại: https://login.tailscale.com/admin/settings/keys"
+echo ""
+echo "Nhập auth key mới:"
+read -r NEW_AUTHKEY
+
+if [ -z "$NEW_AUTHKEY" ]; then
+    echo "❌ Không có auth key, bỏ qua"
+    exit 1
 fi
 
-echo ""
-echo "2. CRONTAB CONFIG:"
-echo "------------------------"
-cat /opt/etc/crontab 2>/dev/null || echo "Khong tim thay crontab"
+# Cập nhật config
+if [ -f /opt/etc/tailscale.conf ]; then
+    sed -i "s/export TS_AUTHKEY=.*/export TS_AUTHKEY=\"$NEW_AUTHKEY\"/" /opt/etc/tailscale.conf
+else
+    echo "export TS_AUTHKEY=\"$NEW_AUTHKEY\"" > /opt/etc/tailscale.conf
+fi
 
-echo ""
-echo "3. LOG FILES:"
-echo "------------------------"
-echo "Restart log (last 5 lines):"
-tail -n 5 /opt/var/log/restart-services.log 2>/dev/null || echo "  Chua co log"
-echo ""
-echo "Auto-restart log (last 5 lines):"
-tail -n 5 /opt/var/log/auto-restart.log 2>/dev/null || echo "  Chua co log"
-echo ""
-echo "Cron log (last 5 lines):"
-tail -n 5 /opt/var/log/cron.log 2>/dev/null || echo "  Chua co log"
+echo "   ✅ Đã cập nhật auth key"
 
-echo ""
-echo "4. NEXT SCHEDULED RESTART:"
-echo "------------------------"
-echo "🕐 5:00 AM hang ngay - restart-services.sh"
-echo "🕐 Moi 30 phut - check-and-restart.sh"
-echo "🕐 Moi gio - fix DNS conflict"
-echo "🕐 @reboot - setup-dns.sh"
+# Restart Tailscale
+echo "   Restart Tailscale để áp dụng..."
+/opt/etc/init.d/S99tailscale restart
 
-echo ""
-echo "========================================"
+echo "✅ Hoàn tất"
 EOF
 
-chmod +x /opt/bin/check-cron.sh
+chmod +x /opt/bin/set-authkey.sh
 check_success
 
-# 16. Tạo symbolic links
+# 17. Tạo symbolic links
 echo ""
-echo "🔗 16. Tạo symbolic links..."
+echo "🔗 17. Tạo symbolic links..."
+ln -sf /opt/etc/init.d/S95ntp /opt/etc/init.d/rc.d/S95ntp 2>/dev/null
 ln -sf /opt/etc/init.d/S97adguardhome /opt/etc/init.d/rc.d/S97adguardhome 2>/dev/null
 ln -sf /opt/etc/init.d/S98tailscaled /opt/etc/init.d/rc.d/S98tailscaled 2>/dev/null
 ln -sf /opt/etc/init.d/S99tailscale /opt/etc/init.d/rc.d/S99tailscale 2>/dev/null
 check_success
 
-# 17. Cấu hình CRON (SỬA LỖI)
+# 18. Cấu hình CRON
 echo ""
-echo "⏰ 17. Cấu hình CRON..."
+echo "⏰ 18. Cấu hình CRON..."
 
 # Backup cron cũ
 if [ -f /opt/etc/crontab ]; then
@@ -1082,6 +1493,9 @@ cat > /opt/etc/crontab << 'EOF'
 
 # Kiem tra va fix DNS sau reboot
 @reboot /opt/bin/setup-dns.sh
+
+# Đồng bộ thời gian mỗi 6 tiếng
+0 */6 * * * /opt/bin/sync-time.sh
 EOF
 
 # Tạo symlink
@@ -1101,14 +1515,14 @@ else
 fi
 check_success
 
-# 18. Chạy setup DNS lần đầu
+# 19. Chạy setup DNS lần đầu
 echo ""
-echo "🔧 18. Cấu hình DNS lần đầu..."
+echo "🔧 19. Cấu hình DNS lần đầu..."
 /opt/bin/setup-dns.sh
 
-# 19. Tạo script uninstall (MỚI)
+# 20. Tạo script uninstall
 echo ""
-echo "🗑️ 19. Tạo script uninstall..."
+echo "🗑️ 20. Tạo script uninstall..."
 cat > /opt/bin/uninstall.sh << 'EOF'
 #!/bin/sh
 # ============================================
@@ -1130,11 +1544,14 @@ echo "1. Dung dich vu..."
 /opt/etc/init.d/S99tailscale stop 2>/dev/null
 /opt/etc/init.d/S98tailscaled stop 2>/dev/null
 /opt/etc/init.d/S97adguardhome stop 2>/dev/null
+/opt/etc/init.d/S95ntp stop 2>/dev/null
 
 echo "2. Xoa init scripts..."
+rm -f /opt/etc/init.d/S95ntp
 rm -f /opt/etc/init.d/S97adguardhome
 rm -f /opt/etc/init.d/S98tailscaled
 rm -f /opt/etc/init.d/S99tailscale
+rm -f /opt/etc/init.d/rc.d/S95ntp
 rm -f /opt/etc/init.d/rc.d/S97adguardhome
 rm -f /opt/etc/init.d/rc.d/S98tailscaled
 rm -f /opt/etc/init.d/rc.d/S99tailscale
@@ -1147,6 +1564,8 @@ rm -rf /opt/etc/AdGuardHome
 rm -rf /opt/var/lib/tailscale
 rm -f /opt/etc/tailscale.conf
 rm -f /opt/etc/crontab
+rm -f /opt/etc/ntp.conf
+rm -f /opt/etc/timezone
 
 echo "5. Xoa utility scripts..."
 rm -f /opt/bin/start-all.sh
@@ -1155,7 +1574,9 @@ rm -f /opt/bin/restart-services.sh
 rm -f /opt/bin/check-and-restart.sh
 rm -f /opt/bin/fix-dns-conflict.sh
 rm -f /opt/bin/setup-dns.sh
-rm -f /opt/bin/check-cron.sh
+rm -f /opt/bin/setup-timezone.sh
+rm -f /opt/bin/sync-time.sh
+rm -f /opt/bin/set-authkey.sh
 
 echo "6. Restore DNS config..."
 if command -v ndmc >/dev/null 2>&1; then
@@ -1164,7 +1585,7 @@ if command -v ndmc >/dev/null 2>&1; then
 fi
 
 echo "7. Xoa packages (optional)..."
-echo "   De xoa package: opkg remove tailscale adguardhome-go"
+echo "   De xoa package: opkg remove tailscale adguardhome-go ntpclient"
 
 echo ""
 echo "✅ Go cai dat hoan tat!"
@@ -1181,10 +1602,18 @@ echo "========================================"
 echo "   🎉 CAI DAT HOAN TAT! 🎉"
 echo "========================================"
 echo ""
+echo "📡 THONG TIN MANG:"
+echo "  IP Router: $DETECTED_IP"
+echo "  Subnet: $DETECTED_SUBNET"
+echo ""
 echo "📌 THU TU KHOI DONG (QUAN TRONG):"
-echo "  1. AdGuard Home (S97) - DNS server"
-echo "  2. tailscaled (S98)   - Tailscale daemon"
-echo "  3. Tailscale (S99)    - Tailscale client + Exit Node"
+echo "  1. NTP (S95)        - Đồng bộ thời gian"
+echo "  2. AdGuard Home (S97) - DNS server"
+echo "  3. tailscaled (S98)   - Tailscale daemon"
+echo "  4. Tailscale (S99)    - Tailscale client + Exit Node"
+echo ""
+echo "🔑 ĐỂ NHẬP AUTH KEY:"
+echo "   /opt/bin/set-authkey.sh"
 echo ""
 echo "🚀 De khoi dong tat ca:"
 echo "   /opt/bin/start-all.sh"
@@ -1195,6 +1624,9 @@ echo ""
 echo "🔧 De fix DNS conflict:"
 echo "   /opt/bin/fix-dns-conflict.sh"
 echo ""
+echo "🕐 De dong bo thoi gian:"
+echo "   /opt/bin/sync-time.sh"
+echo ""
 echo "📋 De kiem tra CRON:"
 echo "   /opt/bin/check-cron.sh"
 echo ""
@@ -1202,14 +1634,14 @@ echo "🗑️ De go cai dat:"
 echo "   /opt/bin/uninstall.sh"
 echo ""
 echo "⚠️ IMPORTANT - CAU HINH ADGUARD HOME:"
-local_ip=$(ip addr show br0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)
-echo "   Truy cap http://${local_ip:-localhost}:3000"
+echo "   Truy cap http://${DETECTED_IP}:3000"
 echo "   De thiet lap AdGuard Home lan dau"
 echo ""
 echo "📋 CRON SCHEDULE:"
 echo "  • 5:00 AM hang ngay  - Restart tat ca dich vu"
 echo "  • Moi 30 phut        - Kiem tra va restart neu chet"
 echo "  • Moi gio             - Fix DNS conflict"
+echo "  • Moi 6 tieng        - Dong bo thoi gian"
 echo "  • @reboot             - Setup DNS sau reboot"
 echo ""
 echo "📁 LOG FILES:"
@@ -1217,15 +1649,16 @@ echo "  /opt/var/log/restart-services.log  - Restart log"
 echo "  /opt/var/log/auto-restart.log      - Auto-restart log"
 echo "  /opt/var/log/cron.log              - Cron log"
 echo "  /opt/var/log/dns-setup.log         - DNS setup log"
+echo "  /opt/var/log/ntp.log               - NTP log"
+echo "  /opt/var/log/time-sync.log         - Time sync log"
 echo ""
 echo "🔑 CAC VI TRI CAN THAY DOI:"
 echo "========================================"
 echo "1. AUTH KEY trong /opt/etc/tailscale.conf"
 echo "   export TS_AUTHKEY=\"tskey-auth-YOUR_KEY_HERE\""
 echo ""
-echo "2. SUBNET trong /opt/etc/tailscale.conf"
-echo "   export TS_ROUTES=\"YOUR_SUBNET/24\""
-echo "   (Vi du: 192.168.1.0/24)"
+echo "2. SUBNET đã tự động phát hiện: $DETECTED_SUBNET"
+echo "   (Có thể thay đổi trong /opt/etc/tailscale.conf nếu cần)"
 echo "========================================"
 echo ""
 echo "✅ Script da san sang!"
