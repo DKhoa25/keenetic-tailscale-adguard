@@ -1,7 +1,7 @@
 #!/bin/sh
 # ============================================
 # KEENETIC TAILSCALE + ADGUARD COMPLETE INSTALLER
-# Version: 2 (No Git)
+# Version: 1
 # ============================================
 
 set -e  # Dừng script nếu có lỗi
