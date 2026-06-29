@@ -1,7 +1,7 @@
 #!/bin/sh
 # ============================================
 # KEENETIC TAILSCALE + ADGUARD COMPLETE INSTALLER
-# Version: 1
+# Version: 2 (No Git)
 # ============================================
 
 set -e  # Dừng script nếu có lỗi
@@ -9,13 +9,12 @@ set -e  # Dừng script nếu có lỗi
 # ============================================
 # CẤU HÌNH
 # ============================================
-REPO_URL="https://github.com/DKhoa25/keenetic-tailscale-adguard.git"
+RAW_URL="https://raw.githubusercontent.com/DKhoa25/keenetic-tailscale-adguard/main"
 INSTALL_DIR="/opt/keenetic-tailscale-adguard"
 LOG_DIR="/var/log/keenetic-install"
 LOG_FILE="$LOG_DIR/install_$(date +%Y%m%d_%H%M%S).log"
 MIN_REQUIRED_SPACE=51200  # 50MB tính bằng KB
 TIMEOUT=60  # Timeout cho các thao tác mạng
-GIT_BRANCH="main"  # Nhánh chính của repo
 
 # ============================================
 # MÀU SẮC CHO OUTPUT
@@ -208,7 +207,7 @@ install_dependencies() {
     local missing_deps=""
     
     # Kiểm tra các gói cần thiết
-    for pkg in git ca-certificates wget curl; do
+    for pkg in ca-certificates wget curl; do
         if ! command -v "$pkg" >/dev/null 2>&1; then
             missing_deps="$missing_deps $pkg"
         fi
@@ -242,70 +241,52 @@ install_dependencies() {
 }
 
 # ============================================
-# CLONE HOẶC DOWNLOAD
+# TẢI TRỰC TIẾP (Không dùng Git)
 # ============================================
-clone_repository() {
+download_files() {
     log_step "TẢI MÃ NGUỒN"
     
-    log_info "Clone từ GitHub..."
+    log_info "Tải trực tiếp từ GitHub..."
     
-    # Thử clone với các tùy chọn tối ưu
-    if git clone --depth 1 --branch "$GIT_BRANCH" --single-branch \
-        --config http.timeout=$TIMEOUT \
-        --config core.compression=0 \
-        "$REPO_URL" "$INSTALL_DIR" 2>&1 | tee -a "$LOG_FILE" | grep -v "Cloning into"; then
-        
-        if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/install.sh" ]; then
-            log_success "Clone thành công"
-            chmod +x "$INSTALL_DIR/install.sh"
-            chmod +x "$INSTALL_DIR"/*.sh 2>/dev/null || true
-            
-            # Kiểm tra checksum
-            verify_checksum "$INSTALL_DIR/install.sh"
-            return 0
-        fi
-    fi
-    
-    log_warning "Clone thất bại, thử phương án khác..."
-    return 1
-}
-
-download_direct() {
-    log_info "Tải trực tiếp từ GitHub (phương án dự phòng)..."
-    
+    # Tạo thư mục cài đặt
     mkdir -p "$INSTALL_DIR"
     cd "$INSTALL_DIR" || return 1
     
-    local RAW_URL="https://raw.githubusercontent.com/DKhoa25/keenetic-tailscale-adguard/$GIT_BRANCH/install.sh"
+    # Danh sách file cần tải
+    FILES="install.sh tailscale.sh adguard.sh uninstall.sh"
+    local success=true
     
-    # Thử nhiều phương pháp tải
-    if command -v wget >/dev/null 2>&1; then
-        wget -q --timeout=$TIMEOUT --show-progress -O install.sh "$RAW_URL"
-    elif command -v curl >/dev/null 2>&1; then
-        curl -L --connect-timeout $TIMEOUT -o install.sh "$RAW_URL"
-    else
-        log_error "Không có wget hoặc curl!"
-        return 1
-    fi
+    for file in $FILES; do
+        log_info "Đang tải: $file..."
+        
+        # Thử wget trước
+        if command -v wget >/dev/null 2>&1; then
+            if wget -q --timeout=$TIMEOUT --show-progress "$RAW_URL/$file" 2>&1 | tee -a "$LOG_FILE"; then
+                chmod +x "$file" 2>/dev/null || true
+                log_success "Đã tải: $file"
+                continue
+            fi
+        fi
+        
+        # Thử curl nếu wget thất bại
+        if command -v curl >/dev/null 2>&1; then
+            if curl -L --connect-timeout $TIMEOUT -s -o "$file" "$RAW_URL/$file" 2>&1 | tee -a "$LOG_FILE"; then
+                chmod +x "$file" 2>/dev/null || true
+                log_success "Đã tải: $file"
+                continue
+            fi
+        fi
+        
+        log_error "Không thể tải: $file"
+        success=false
+    done
     
-    if [ $? -eq 0 ] && [ -f "install.sh" ] && [ -s "install.sh" ]; then
-        log_success "Tải thành công"
-        chmod +x install.sh
-        verify_checksum "install.sh"
+    if [ "$success" = true ]; then
+        log_success "Tải tất cả file thành công"
         return 0
-    fi
-    
-    log_error "Tải thất bại"
-    return 1
-}
-
-verify_checksum() {
-    local file="$1"
-    
-    # Tạo checksum cơ bản (không bắt buộc)
-    if command -v sha256sum >/dev/null 2>&1; then
-        local checksum=$(sha256sum "$file" | awk '{print $1}')
-        log_info "SHA256 checksum: $checksum"
+    else
+        log_error "Một số file không thể tải"
+        return 1
     fi
 }
 
@@ -412,7 +393,7 @@ error_handler() {
     echo "Arch: $(uname -m)"
     echo "Memory: $(free -m | grep Mem | awk '{print $2}') MB"
     
-    if [ -f "$LOG_FILE" ]; then
+    if [ -f "$LOG_FILE" ]; thì
         echo "Log: $LOG_FILE"
         echo "10 dòng cuối log:"
         tail -n 10 "$LOG_FILE"
@@ -436,7 +417,7 @@ setup_logging
 echo ""
 echo "${CYAN}╔════════════════════════════════════════════╗${NC}"
 echo "${CYAN}║  TAILSCALE + ADGUARD HOME INSTALLER       ║${NC}"
-echo "${CYAN}║  Version: 5.0 - Hoàn thiện               ║${NC}"
+echo "${CYAN}║  Version: 6.0 - No Git                   ║${NC}"
 echo "${CYAN}║  Cho Keenetic Router                     ║${NC}"
 echo "${CYAN}╚════════════════════════════════════════════╝${NC}"
 echo ""
@@ -463,15 +444,12 @@ if ! install_dependencies; then
     exit 1
 fi
 
-# Tải mã nguồn
-if ! clone_repository; then
-    log_warning "Clone thất bại, thử tải trực tiếp..."
-    if ! download_direct; then
-        log_error "Không thể tải mã nguồn!"
-        log_error "Vui lòng kiểm tra kết nối và thử lại."
-        restore_from_backup $?
-        exit 1
-    fi
+# Tải mã nguồn (không dùng Git)
+if ! download_files; then
+    log_error "Không thể tải mã nguồn!"
+    log_error "Vui lòng kiểm tra kết nối và thử lại."
+    restore_from_backup $?
+    exit 1
 fi
 
 # Chạy cài đặt
