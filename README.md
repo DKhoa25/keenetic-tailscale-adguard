@@ -1,334 +1,400 @@
-🚀 Keenetic Tailscale + AdGuard Installer
+markdown
 
-https://img.shields.io/badge/version-5.0-blue.svg
-https://img.shields.io/badge/license-MIT-green.svg
-https://img.shields.io/badge/OpenWrt-22.03+-orange.svg
-https://img.shields.io/badge/Keenetic-Compatible-red.svg
-<div align="center"> <h3>Giải pháp tự động cài đặt Tailscale VPN & AdGuard Home trên router Keenetic</h3> <p><strong>Version 5.0 - Hoàn thiện với nhiều cải tiến vượt trội</strong></p> </div>
-📖 Tổng quan
+# 🚀 Keenetic Tailscale + AdGuard Home Installer
 
-Script cài đặt tự động Tailscale (VPN mesh) và AdGuard Home (chặn quảng cáo/DNS) trên các router Keenetic chạy hệ điều hành OpenWrt/KeeneticOS.
+[![Version](https://img.shields.io/badge/version-5.0-blue.svg)](https://github.com/DKhoa25/keenetic-tailscale-adguard)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![OpenWrt](https://img.shields.io/badge/OpenWrt-22.03+-orange.svg)](https://openwrt.org/)
+[![Keenetic](https://img.shields.io/badge/Keenetic-Compatible-brightgreen.svg)](https://keenetic.com/)
 
-Điểm nổi bật:
+**Một script cài đặt tự động hoàn chỉnh cho Tailscale và AdGuard Home trên router Keenetic/OpenWrt.**
 
-    🔄 Cài đặt hoàn toàn tự động
+---
 
-    🛡️ Bảo mật với xác minh checksum
+## 📋 Mục Lục
 
-    📝 Logging đầy đủ để dễ dàng debug
+- [Tính Năng Nổi Bật](#-tính-năng-nổi-bật)
+- [Yêu Cầu Hệ Thống](#-yêu-cầu-hệ-thống)
+- [Cài Đặt Nhanh](#-cài-đặt-nhanh)
+- [Hướng Dẫn Chi Tiết](#-hướng-dẫn-chi-tiết)
+- [Cấu Hình Sau Cài Đặt](#-cấu-hình-sau-cài-đặt)
+- [Xử Lý Sự Cố](#-xử-lý-sự-cố)
+- [Gỡ Cài Đặt](#-gỡ-cài-đặt)
+- [Đóng Góp](#-đóng-góp)
+- [Giấy Phép](#-giấy-phép)
 
-    🔙 Tự động backup và restore khi có lỗi
+---
 
-    🎨 Giao diện đẹp mắt với màu sắc và icon
+## ✨ Tính Năng Nổi Bật
 
-    ⚡ Tối ưu hóa cho router với dung lượng hạn chế
+### 🛡️ Tailscale
+- **Mesh VPN** - Kết nối an toàn giữa các thiết bị
+- **NAT Traversal** - Vượt tường lửa và NAT tự động
+- **Zero Config** - Không cần cấu hình phức tạp
+- **Magic DNS** - Truy cập thiết bị bằng tên thay vì IP
+- **Tự động khởi động** - Service chạy cùng hệ thống
 
-✨ Tính năng
-Cốt lõi
+### 🛡️ AdGuard Home
+- **Chặn quảng cáo** - Toàn bộ mạng nội bộ
+- **Bảo vệ quyền riêng tư** - Không theo dõi người dùng
+- **DNS over HTTPS/TLS** - Mã hóa truy vấn DNS
+- **Giao diện quản lý** - Dashboard trực quan, dễ sử dụng
+- **Bộ lọc tùy chỉnh** - Thêm filter theo nhu cầu
 
-    ✅ Tailscale VPN: Kết nối mesh network an toàn giữa các thiết bị
+### ⚙️ Script Thông Minh
+- ✅ **Tự động kiểm tra** - Môi trường, dung lượng, kết nối
+- ✅ **Backup tự động** - Sao lưu cấu hình cũ trước khi cài mới
+- ✅ **Xử lý lỗi thông minh** - Bắt lỗi và khôi phục khi cần
+- ✅ **Log chi tiết** - Ghi nhật ký để dễ dàng debug
+- ✅ **Hỗ trợ đa kiến trúc** - ARM, MIPS, x86, và nhiều hơn nữa
 
-    ✅ AdGuard Home: Chặn quảng cáo, bảo vệ DNS, tăng tốc duyệt web
+---
 
-    ✅ Tự động hóa: Chỉ cần chạy 1 lệnh duy nhất
+## 🔧 Yêu Cầu Hệ Thống
 
-    ✅ Xử lý lỗi thông minh: Nhiều lớp fallback và recovery
+### Router/Hệ Thống
+| Yêu cầu | Chi tiết |
+|---------|----------|
+| **Hệ điều hành** | OpenWrt 22.03+ hoặc Keenetic OS |
+| **Kiến trúc** | aarch64, arm64, armv7l, mips, mips64, i386, x86_64 |
+| **Dung lượng trống** | Tối thiểu 50MB trên partition `/opt` |
+| **Kết nối mạng** | Cần truy cập Internet để tải gói và source |
+| **Quyền** | Root/admin access |
 
-Nâng cao
+### Phần Mềm Cần Thiết (Tự động cài)
+- `opkg` - Trình quản lý gói OpenWrt
+- `git` - Tải mã nguồn từ GitHub
+- `wget` / `curl` - Tải file trực tiếp
+- `ca-certificates` - Chứng chỉ SSL
 
-    🔍 Kiểm tra môi trường: CPU architecture, dung lượng đĩa, kết nối internet
+---
 
-    📦 Quản lý dependencies: Tự động cài Git, wget, curl, ca-certificates
+## 📦 Cài Đặt Nhanh
 
-    💾 Backup thông minh: Tự động backup cài đặt cũ trước khi nâng cấp
+### Cách 1: Clone Trực Tiếp (Khuyến nghị)
+```bash
+# Chạy với quyền root
+curl -sSL https://raw.githubusercontent.com/DKhoa25/keenetic-tailscale-adguard/main/install.sh | sh
 
-    🔐 Bảo mật: Xác minh checksum, kiểm tra chữ ký
-
-    📊 Logging chi tiết: Lưu log để dễ dàng kiểm tra và debug
-
-    🎯 Hỗ trợ đa nền tảng: aarch64, armv7l, mips, x86_64
-
-📋 Yêu cầu hệ thống
-Yêu cầu	Chi tiết
-Router	Keenetic hoặc OpenWrt 22.03+
-Kiến trúc	aarch64, armv7l, mips, mips64, i386, x86_64
-Dung lượng	Tối thiểu 50MB trống
-Kết nối	Internet để tải dependencies và source
-Quyền	Root access (admin)
-RAM	Khuyến nghị 128MB+
-🚀 Cài đặt nhanh
-Cách 1: Cài đặt tự động (Khuyến nghị)
+Cách 2: Tải và Chạy
 bash
 
-# Tải và chạy script installer
-curl -L https://raw.githubusercontent.com/DKhoa25/keenetic-tailscale-adguard/main/installer.sh -o /tmp/installer.sh
-chmod +x /tmp/installer.sh
-/tmp/installer.sh
-
-Cách 2: Sử dụng wget
-bash
-
-wget -O /tmp/installer.sh https://raw.githubusercontent.com/DKhoa25/keenetic-tailscale-adguard/main/installer.sh
-chmod +x /tmp/installer.sh
-/tmp/installer.sh
-
-Cách 3: Tải trực tiếp về router
-bash
-
-# SSH vào router và thực hiện
-cd /tmp
+# Tải script
 wget https://raw.githubusercontent.com/DKhoa25/keenetic-tailscale-adguard/main/installer.sh
-sh installer.sh
 
-📖 Hướng dẫn chi tiết
-🔄 Quá trình cài đặt
+# Cấp quyền và chạy
+chmod +x installer.sh
+./installer.sh
 
-Script sẽ thực hiện các bước sau:
-📝 Cấu trúc thư mục
-text
-
-/opt/keenetic-tailscale-adguard/    # Thư mục cài đặt chính
-├── install.sh                      # Script cài đặt chính
-├── config/                         # File cấu hình
-│   ├── tailscale.conf
-│   └── adguard.conf
-├── scripts/                        # Script hỗ trợ
-│   ├── start.sh
-│   └── stop.sh
-└── logs/                           # Log files (nếu có)
-
-/var/log/keenetic-install/          # Log của installer
-└── install_YYYYMMDD_HHMMSS.log
-
-/etc/config/                        # Cấu hình hệ thống
-├── tailscale
-└── adguardhome
-
-🎯 Sau khi cài đặt
-1. Kiểm tra Tailscale
+Cách 3: Manual Install
 bash
+
+# Clone repository
+git clone https://github.com/DKhoa25/keenetic-tailscale-adguard.git /opt/keenetic-tailscale-adguard
+
+# Vào thư mục và chạy
+cd /opt/keenetic-tailscale-adguard
+./install.sh
+
+📖 Hướng Dẫn Chi Tiết
+Quá Trình Cài Đặt
+
+Script sẽ tự động thực hiện các bước sau:
+Các Bước Chi Tiết
+1️⃣ Kiểm Tra Môi Trường
+
+    Kiểm tra quyền root
+
+    Xác định kiến trúc CPU
+
+    Đảm bảo đủ dung lượng trống
+
+    Kiểm tra opkg và kết nối internet
+
+2️⃣ Backup Cài Đặt Cũ
+
+    Tự động backup thư mục /opt/keenetic-tailscale-adguard
+
+    Lưu backup với timestamp
+
+    Xóa thư mục cũ để cài đặt sạch
+
+3️⃣ Cài Đặt Dependencies
+
+    Tự động cài đặt các gói cần thiết:
+
+        git - Quản lý source code
+
+        wget / curl - Tải file
+
+        ca-certificates - Chứng chỉ SSL
+
+        Các gói cần thiết cho Tailscale và AdGuard
+
+4️⃣ Tải Mã Nguồn
+
+    Ưu tiên clone từ GitHub
+
+    Fallback: Tải trực tiếp nếu clone thất bại
+
+    Xác thực checksum file
+
+5️⃣ Cài Đặt Chính
+
+    Cài đặt Tailscale (VPN mesh)
+
+    Cài đặt AdGuard Home (DNS filter)
+
+    Cấu hình services
+
+    Thiết lập auto-start
+
+6️⃣ Kiểm Tra Sau Cài Đặt
+
+    Xác nhận services đang chạy
+
+    Hiển thị thông tin cài đặt
+
+    Log chi tiết quá trình
+
+⚙️ Cấu Hình Sau Cài Đặt
+🔗 Cấu Hình Tailscale
+bash
+
+# Khởi động Tailscale
+/etc/init.d/tailscale start
+
+# Đăng nhập và kết nối
+tailscale up
 
 # Kiểm tra trạng thái
 tailscale status
 
-# Đăng nhập (lấy link từ output)
+# Danh sách thiết bị kết nối
+tailscale status --peers
+
+# Tắt/Chạy Tailscale
+tailscale down
 tailscale up
 
-# Kiểm tra interface
-ip addr show tailscale0
-
-2. Cấu hình AdGuard Home
+🛡️ Cấu Hình AdGuard Home
 bash
 
-# Kiểm tra trạng thái
+# Truy cập Web Interface
+http://[ROUTER_IP]:3000
+
+# Hoặc
+http://192.168.1.1:3000
+
+# Mật khẩu mặc định (nếu có)
+Username: admin
+Password: admin  # Thay đổi ngay sau khi đăng nhập
+
+Cấu Hình DNS
+bash
+
+# Set DNS mặc định cho router
+uci set network.lan.dns="127.0.0.1"
+uci commit network
+/etc/init.d/network restart
+
+# Hoặc cấu hình DHCP
+uci set dhcp.@dnsmasq[0].noresolv="1"
+uci set dhcp.@dnsmasq[0].resolvfile="/tmp/resolv.conf.auto"
+uci set dhcp.@dnsmasq[0].server="127.0.0.1#5335"
+uci commit dhcp
+/etc/init.d/dnsmasq restart
+
+🌐 Cấu Hình Bộ Lọc
+
+Bộ lọc khuyến nghị:
+text
+
+https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
+https://raw.githubusercontent.com/AdAway/adaway.github.io/master/hosts.txt
+https://raw.githubusercontent.com/AdguardTeam/AdguardFilters/master/SpywareFilter/sections/tracking_servers.txt
+https://raw.githubusercontent.com/AdguardTeam/AdguardFilters/master/BaseFilter/sections/adservers.txt
+
+🔍 Xử Lý Sự Cố
+Lỗi Thường Gặp
+1. Cannot connect to internet
+text
+
+❌ Kiểm tra:
+- Router có kết nối WAN không?
+- DNS có hoạt động không? (ping 8.8.8.8)
+- Cấu hình mạng có đúng không?
+
+2. No space left on device
+text
+
+❌ Giải pháp:
+- Xóa các gói không cần thiết: opkg remove [package]
+- Xóa log cũ: rm -rf /var/log/*.log
+- Mở rộng partition /opt
+
+3. Tailscale not starting
+text
+
+❌ Kiểm tra:
+- tailscale status
+- /etc/init.d/tailscale status
+- tailscale up --help
+- Xem log: tail -f /var/log/tailscale.log
+
+4. AdGuard Home không khởi động
+bash
+
+# Kiểm tra log
 /etc/init.d/adguardhome status
+tail -f /var/log/adguardhome.log
 
-# Truy cập web interface
-# Mở trình duyệt: http://[IP-router]:3000
-# Mặc định: http://192.168.1.1:3000
+# Kiểm tra port
+netstat -tuln | grep 3000
+netstat -tuln | grep 5335
 
-3. Các lệnh hữu ích
+# Reset AdGuard
+rm -rf /opt/adguardhome/data/*.db
+/etc/init.d/adguardhome restart
+
+5. Lỗi sau khi update OpenWrt
 bash
 
-# Xem log cài đặt
-cat /var/log/keenetic-install/install_*.log
+# Reinstall các gói
+opkg update
+opkg install --force-reinstall tailscale adguardhome
 
-# Khởi động lại dịch vụ
+# Restart services
 /etc/init.d/tailscale restart
 /etc/init.d/adguardhome restart
 
-# Xem trạng thái chi tiết
-ps | grep -E 'tailscale|adguard'
-netstat -tulpn | grep -E '53|3000|41641'
-
-🔧 Xử lý sự cố
-❌ Lỗi thường gặp
-<details> <summary><b>Không có kết nối internet</b></summary>
+🔍 Kiểm Tra Log
 bash
 
-# Kiểm tra DNS
-ping -c 2 8.8.8.8
+# Log cài đặt
+cat /var/log/keenetic-install/install_*.log
 
-# Kiểm tra kết nối
-ping -c 2 google.com
+# Tailscale
+logread | grep tailscale
+tail -f /var/log/tailscale.log
 
-# Sửa DNS
-echo "nameserver 8.8.8.8" > /etc/resolv.conf
+# AdGuard Home
+logread | grep adguardhome
+cat /opt/adguardhome/data/querylog.json | tail -20
 
-</details><details> <summary><b>Không đủ dung lượng</b></summary>
+🗑️ Gỡ Cài Đặt
 bash
 
-# Kiểm tra dung lượng
-df -h
+# 1. Dừng services
+/etc/init.d/tailscale stop
+/etc/init.d/adguardhome stop
 
-# Dọn dẹp package cache
-opkg clean
+# 2. Xóa services khỏi init.d
+rm /etc/init.d/tailscale
+rm /etc/init.d/adguardhome
 
-# Xóa log cũ
-find /var/log -name "*.log" -mtime +30 -delete
+# 3. Xóa thư mục cài đặt
+rm -rf /opt/keenetic-tailscale-adguard
+rm -rf /opt/tailscale
+rm -rf /opt/adguardhome
 
-# Xóa thư mục tạm
-rm -rf /tmp/*.ipk
+# 4. Xóa cấu hình (optional)
+rm -rf /etc/config/tailscale
+rm -rf /etc/config/adguardhome
 
-</details><details> <summary><b>Không thể cài Git</b></summary>
-bash
+# 5. Xóa gói (optional)
+opkg remove tailscale adguardhome --autoremove
 
-# Cập nhật package list
-opkg update
+# 6. Xóa log
+rm -rf /var/log/keenetic-install
 
-# Cài thủ công
-opkg install git git-http ca-certificates
+🤝 Đóng Góp
 
-# Nếu vẫn lỗi, tải binary
-wget -O /usr/bin/git https://github.com/git/git/raw/master/git
-chmod +x /usr/bin/git
+Chúng tôi rất hoan nghênh các đóng góp để cải thiện dự án!
+Cách Đóng Góp
 
-</details><details> <summary><b>Port đã được sử dụng</b></summary>
-bash
+    Fork repository
 
-# Kiểm tra port 53 (DNS)
-netstat -tulpn | grep :53
+    Tạo branch mới: git checkout -b feature/amazing-feature
 
-# Kiểm tra port 3000 (AdGuard)
-netstat -tulpn | grep :3000
+    Commit thay đổi: git commit -m 'Add some amazing feature'
 
-# Dừng dịch vụ xung đột
-/etc/init.d/dnsmasq stop
+    Push lên branch: git push origin feature/amazing-feature
 
-</details>
-📊 Debug
-bash
+    Tạo Pull Request
 
-# Xem log realtime
-tail -f /var/log/keenetic-install/install_*.log
+Báo Cáo Lỗi
 
-# Kiểm tra system logs
-logread -e "tailscale|adguard"
+Vui lòng tạo issue với các thông tin:
 
-# Kiểm tra resource
-top -n 1 | head -10
-free -m
+    Mô tả lỗi chi tiết
 
-🔒 Bảo mật
-Tài khoản mặc định
+    Log file (/var/log/keenetic-install/install_*.log)
 
-    AdGuard Home: Không có mật khẩu mặc định, sẽ yêu cầu tạo khi lần đầu truy cập
+    Thông tin router: uname -a, opkg list-installed
 
-    Tailscale: Đăng nhập qua link xác thực, không lưu mật khẩu
+    Các bước tái hiện lỗi
 
-Khuyến nghị bảo mật
+📝 Changelog
+Version 1.0 (Current)
 
-    ✅ Thay đổi mật khẩu admin router
+    ✅ Thêm kiểm tra dung lượng đĩa
 
-    ✅ Đặt mật khẩu mạnh cho AdGuard Home
+    ✅ Cải thiện xử lý lỗi
 
-    ✅ Bật firewall cho Tailscale
+    ✅ Hỗ trợ nhiều kiến trúc hơn
 
-    ✅ Thường xuyên cập nhật phiên bản mới
+    ✅ Backup tự động trước khi cài đặt
 
-    ✅ Sử dụng HTTPS cho AdGuard Home
+    ✅ Thêm fallback tải source
 
-🔄 Cập nhật và nâng cấp
-Cập nhật lên phiên bản mới
-bash
+    ✅ Cải thiện logging và debug
 
-# Chạy lại installer (tự động backup và upgrade)
-/tmp/installer.sh
+    ✅ Tự động dọn dẹp file tạm
 
-# Hoặc tải và chạy lại
-curl -L https://raw.githubusercontent.com/DKhoa25/keenetic-tailscale-adguard/main/installer.sh | sh
+    ➕ Thêm hỗ trợ AdGuard Home
 
-Kiểm tra phiên bản
-bash
+    ✅ Tối ưu hóa script
 
-# Kiểm tra phiên bản script
-grep "Version:" /opt/keenetic-tailscale-adguard/install.sh
+    🔧 Sửa lỗi cài đặt trên Keenetic
 
-# Kiểm tra phiên bản Tailscale
-tailscale version
+    ➕ Tích hợp Tailscale
 
-# Kiểm tra phiên bản AdGuard
-/usr/bin/adguardhome --version
+    🔧 Cải thiện tương thích OpenWrt
 
-💡 Mẹo và thủ thuật
-Tối ưu hiệu suất
-bash
+📄 Giấy Phép
 
-# Điều chỉnh buffer cho Tailscale
-echo "net.core.rmem_max = 16777216" >> /etc/sysctl.conf
-echo "net.core.wmem_max = 16777216" >> /etc/sysctl.conf
+Dự án được phân phối dưới giấy phép MIT. Xem file LICENSE để biết thêm chi tiết.
+text
 
-# Cache DNS cho AdGuard
-echo "cache_size = 1000000" >> /etc/adguardhome/AdGuardHome.yaml
+MIT License
 
-Tự động khởi động
-bash
+Copyright (c) 2024 DKhoa25
 
-# Thêm vào khởi động
-/etc/init.d/tailscale enable
-/etc/init.d/adguardhome enable
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+...
 
-# Khởi động lại để test
-reboot
+🙏 Cảm Ơn
 
-Backup & Restore cấu hình
-bash
+    Tailscale - VPN mesh đơn giản và an toàn
 
-# Backup
-tar -czf /tmp/keenetic_backup.tar.gz \
-    /etc/config/tailscale \
-    /etc/config/adguardhome \
-    /opt/keenetic-tailscale-adguard
+    AdGuard - Bảo vệ quyền riêng tư và chặn quảng cáo
 
-# Restore
-tar -xzf /tmp/keenetic_backup.tar.gz -C /
+    OpenWrt - Nền tảng router mã nguồn mở
 
-🤝 Đóng góp
+    Keenetic - Router chất lượng cao
 
-Chúng tôi luôn chào đón sự đóng góp từ cộng đồng!
-Cách đóng góp
+📞 Liên Hệ
 
-    🍴 Fork repository
+    GitHub: DKhoa25
 
-    🔧 Tạo branch mới (git checkout -b feature/AmazingFeature)
+    Issues: Báo cáo lỗi
 
-    📝 Commit thay đổi (git commit -m 'Add some AmazingFeature')
+    Discussions: Thảo luận
 
-    📤 Push lên branch (git push origin feature/AmazingFeature)
-
-    🎉 Tạo Pull Request
-
-Báo lỗi
-
-Vui lòng tạo Issue với:
-
-    📋 Phiên bản script
-
-    🖥️ Router model và firmware
-
-    📝 Log đầy đủ
-
-    🔄 Các bước tái hiện lỗi
-
-📜 License
-
-Distributed under the MIT License. See LICENSE for more information.
-🙏 Cảm ơn
-
-    Tailscale - VPN mesh tuyệt vời
-
-    AdGuard Team - Giải pháp chặn quảng cáo hiệu quả
-
-    OpenWrt - Hệ điều hành mạnh mẽ cho router
-
-    Cộng đồng Keenetic Việt Nam
-
-📞 Hỗ trợ
-
-    GitHub Issues: Create Issue
-
-    Telegram: @keenetic_tailscale
-
-    Email: support@dkhoa.dev
-
-<div align="center"> <p>⭐ Star us on GitHub — it motivates us a lot! ⭐</p> <p><sub>Made with ❤️ by DKhoa25 and contributors</sub></p> </div>
+<div align="center"> <sub>Built with ❤️ by <a href="https://github.com/DKhoa25">DKhoa25</a></sub> </div> ```
