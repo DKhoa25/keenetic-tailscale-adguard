@@ -88,28 +88,16 @@ opkg --version
 
 🚀 Cài đặt nhanh
 
-## 1. Clone Repository
-cd opt
-git clone  https://github.com/DKhoa25/keenetic-tailscale-adguard.git
-cd arch-setup-script
-
-## 2. Chạy Script
-bash
-
-chmod +x arch-setup.sh
-sudo ./arch-setup.sh
-
-
-
 1️⃣ Tải script
 bash
 
 # Tải trực tiếp từ GitHub
-wget -O install.sh https://raw.githubusercontent.com/DKhoa25/keenetic-tailscale-adguard/main/install.sh
+# 1. Tạo thư mục và tải script
+mkdir -p /opt/keenetic-tailscale-adguard
+cd /opt/keenetic-tailscale-adguard
 
-# Hoặc tạo file trực tiếp
-nano install.sh
-# Paste nội dung script vào
+# 2. Tải script install
+wget -O install.sh https://raw.githubusercontent.com/DKhoa25/keenetic-tailscale-adguard/main/install.sh
 
 2️⃣ Phân quyền và chạy
 bash
